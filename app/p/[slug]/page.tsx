@@ -14,7 +14,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ? `${extra.school} • ${extra.job_type}`
       : "Matcha Match profile card";
 
-  const baseUrl = process.env.https://matcha-cards.vercel.app!;
+  const baseUrl = process.env.SITE_URL!;
   const url = `${baseUrl}/p/${params.slug}`;
 
   const ogBase = user?.card_og_url || process.env.DEFAULT_OG_IMAGE!;
