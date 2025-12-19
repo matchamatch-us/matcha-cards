@@ -1,43 +1,55 @@
 import { supabaseServer } from "@/lib/supabaseServer";
 
-export type Role = "mentor" | "mentee";
+type UserRow = {
+  user_id: string;
+  name: string | null;
+  role: "mentor" | "mentee" | null;
+  profile_slug: string | null;
+  photo_url: string | null;
+  card_full_url: string | null;
+  card_og_url: string | null;
+  card_status: string | null;
+  card_last_generated_at: string | null;
+};
 
 export async function getProfileBySlug(slug: string) {
   const supabase = supabaseServer();
 
-  // 1) Fetch base user row
+  // Fetch the user by slug
   const { data: user, error: userErr } = await supabase
     .from("users")
     .select(
-      "uuid, name, role, profile_slug, photo_url, card_status, card_full_url, card_og_url, card_last_generated_at"
+      "user_id, name, role, profile_slug, photo_url, card_full_url, card_og_url, card_status, card_last_generated_at"
     )
     .eq("profile_slug", slug)
-    .maybeSingle();
+    .maybeSingle<UserRow>();
 
   if (userErr) throw userErr;
   if (!user) return { user: null, extra: null };
 
-  // 2) Fetch role-specific info
-  // IMPORTANT: adjust selected column names if your mentors/mentees schema differs.
-  let extra: any = null;
+  // Fetch role-specific fields
+  let extra: { school?: string | null; job_type?: string | null } | null = null;
 
-  if ((user.role as Role) === "mentor") {
+  if (user.role === "mentor") {
     const { data, error } = await supabase
-      .from("mentors")
-      .select("school, job_type, company") // <- change/extend if you have more fields
-      .eq("uuid", user.uuid)
+      .from("mentor_profiles")
+      .select("school, job_type")
+      .eq("user_id", user.user_id)
       .maybeSingle();
+
     if (error) throw error;
     extra = data;
-  } else {
+  } else if (user.role === "mentee") {
     const { data, error } = await supabase
-      .from("mentees")
-      .select("school, job_type, ten_years, favorite_color") // <- change/extend if you have more fields
-      .eq("uuid", user.uuid)
+      .from("mentee_profiles")
+      .select("school, job_type")
+      .eq("user_id", user.user_id)
       .maybeSingle();
+
     if (error) throw error;
     extra = data;
   }
 
   return { user, extra };
 }
+
