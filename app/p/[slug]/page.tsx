@@ -3,91 +3,199 @@ import { getProfileBySlug } from "@/lib/getProfile";
 
 export const dynamic = "force-dynamic";
 
-type Props = { params: { slug: string } };
+function getBaseUrl() {
+  const raw = (process.env.SITE_URL || "https://matcha-cards.vercel.app").trim();
+  return raw.replace(/\/+$/, "");
+}
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { user, extra } = await getProfileBySlug(params.slug);
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const { user, extra } = await getProfileBySlug(slug);
 
-  const title = user?.name ? `${user.name} — Matcha Match` : "Matcha Match Profile";
-  const desc =
-    extra?.school && extra?.job_type
-      ? `${extra.school} • ${extra.job_type}`
+  const title = user?.name ? `${user.name} • Matcha Match` : "Matcha Match profile card";
+  const description =
+    extra?.school || extra?.job_type
+      ? `${extra?.school ?? ""}${extra?.school && extra?.job_type ? " • " : ""}${extra?.job_type ?? ""}`
       : "Matcha Match profile card";
 
-  const baseUrl = process.env.SITE_URL!;
-  const url = `${baseUrl}/p/${params.slug}`;
-
-  const ogBase = user?.card_og_url || process.env.DEFAULT_OG_IMAGE!;
-  const v = user?.card_last_generated_at
-    ? `?v=${encodeURIComponent(user.card_last_generated_at)}`
-    : "";
-  const ogImage = `${ogBase}${v}`;
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/p/${slug}`;
+  const ogImage =
+    user?.card_og_url ||
+    process.env.DEFAULT_OG_IMAGE ||
+    `${baseUrl}/default-og.png`;
 
   return {
     title,
-    description: desc,
+    description,
+    alternates: { canonical: url },
     openGraph: {
       title,
-      description: desc,
+      description,
       url,
       type: "website",
-      images: [{ url: ogImage, width: 1200, height: 630 }],
+      images: [{ url: ogImage }],
     },
     twitter: {
       card: "summary_large_image",
       title,
-      description: desc,
+      description,
       images: [ogImage],
     },
-    robots: { index: false, follow: false },
   };
 }
 
-export default async function ProfilePage({ params }: Props) {
-  const { user, extra } = await getProfileBySlug(params.slug);
+export default async function ProfilePage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const { user, extra } = await getProfileBySlug(slug);
 
+  // Instead of hard 404, show a helpful debug page (for now)
   if (!user) {
-    return <div className="p-10">Not found.</div>;
+    return (
+      <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "system-ui" }}>
+        <div style={{ maxWidth: 520, width: "100%" }}>
+          <h1 style={{ fontSize: 24, marginBottom: 8 }}>Profile not found</h1>
+          <p style={{ opacity: 0.7, lineHeight: 1.4 }}>
+            No user matched <code>{slug}</code> in <code>users.profile_slug</code>.
+          </p>
+        </div>
+      </main>
+    );
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-neutral-50">
-      <div className="w-full max-w-md">
-        <div className="mb-4 text-center">
-          <div className="text-2xl font-semibold">{user.name || "Matcha Match"}</div>
-          <div className="text-sm text-neutral-600">
-            {extra?.school ? extra.school : ""} {extra?.job_type ? `• ${extra.job_type}` : ""}
-          </div>
-          <div className="text-xs text-neutral-400 mt-1">{user.role}</div>
-        </div>
+  const name = user.name || "Matcha Match User";
+  const photo = user.photo_url || "";
+  const school = extra?.school || "";
+  const job = extra?.job_type || "";
 
-        {user.card_status !== "ready" || !user.card_full_url ? (
-          <div className="rounded-2xl bg-white shadow p-6 text-center">
-            Card not generated yet.
-            <div className="text-sm text-neutral-500 mt-2">
-              (Once generated, it will show here and the link preview will improve.)
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        background: "#0b0b0c",
+        fontFamily: "system-ui",
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 420 }}>
+        <div
+          style={{
+            width: "100%",
+            aspectRatio: "9 / 16",
+            borderRadius: 32,
+            overflow: "hidden",
+            boxShadow: "0 30px 80px rgba(0,0,0,0.55)",
+            position: "relative",
+            background: "#111",
+          }}
+        >
+          {photo ? (
+            <img
+              src={photo}
+              alt={name}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "white",
+                opacity: 0.7,
+              }}
+            >
+              No photo yet
+            </div>
+          )}
+
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0.0) 55%, rgba(0,0,0,0.45))",
+            }}
+          />
+
+          <div
+            style={{
+              position: "absolute",
+              top: 28,
+              left: 24,
+              right: 24,
+              textAlign: "center",
+              color: "white",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 34,
+                fontWeight: 800,
+                lineHeight: 1.1,
+                textShadow: "0 8px 20px rgba(0,0,0,0.45)",
+              }}
+            >
+              {name}
+            </div>
+            <div style={{ marginTop: 8, opacity: 0.9 }}>Connecting</div>
+          </div>
+
+          <div
+            style={{
+              position: "absolute",
+              bottom: 24,
+              left: 24,
+              right: 24,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-end",
+              gap: 16,
+              color: "white",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{school}</div>
+              <div style={{ fontSize: 16, opacity: 0.9 }}>{job}</div>
+            </div>
+
+            <div
+              style={{
+                background: "rgba(255,255,255,0.92)",
+                color: "#000",
+                padding: "14px 18px",
+                borderRadius: 16,
+                fontWeight: 800,
+              }}
+            >
+              Connect Now
             </div>
           </div>
-        ) : (
-          <div className="rounded-3xl overflow-hidden shadow bg-white">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={user.card_full_url} alt="Profile card" className="w-full h-auto" />
-          </div>
-        )}
+        </div>
 
-        {user.card_full_url && (
-          <div className="mt-4">
-            <a
-              href={user.card_full_url}
-              className="block text-center rounded-xl bg-black text-white py-3"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Download card
-            </a>
-          </div>
-        )}
+        <p style={{ color: "rgba(255,255,255,0.65)", fontSize: 13, marginTop: 12, textAlign: "center" }}>
+          This page exists mainly for iMessage link previews (Open Graph).
+        </p>
       </div>
-    </div>
+    </main>
   );
 }
