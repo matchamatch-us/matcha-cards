@@ -1,7 +1,58 @@
 import { ImageResponse } from "next/og";
-import { getProfileBySlug } from "@/lib/getProfile";
 
 export const runtime = "edge";
+
+type UserRow = {
+  user_id: string;
+  name: string | null;
+  role: "mentor" | "mentee" | null;
+  profile_slug: string | null;
+  photo_url: string | null;
+  favorite_color: string | null;
+};
+
+type ExtraRow = {
+  school: string | null;
+  job_type: string | null;
+};
+
+async function supabaseSelect<T>(
+  table: string,
+  query: Record<string, string>
+): Promise<T[]> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceKey) {
+    console.error("Missing Supabase env vars", {
+      hasUrl: !!supabaseUrl,
+      hasKey: !!serviceKey,
+    });
+    return [];
+  }
+
+  const qs = new URLSearchParams(query);
+  const url = `${supabaseUrl}/rest/v1/${table}?${qs.toString()}`;
+
+  const res = await fetch(url, {
+    headers: {
+      apikey: serviceKey,
+      authorization: `Bearer ${serviceKey}`,
+      // keep it explicit
+      "content-type": "application/json",
+    },
+    // Edge fetch caching can be weird; force fresh
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    console.error("Supabase REST error", table, res.status, text);
+    return [];
+  }
+
+  return (await res.json()) as T[];
+}
 
 export async function GET(
   _req: Request,
@@ -9,21 +60,46 @@ export async function GET(
 ) {
   const { slug } = await context.params;
 
+  // defaults (fallback)
   let name = "Matcha Match User";
   let school = "";
   let job = "";
   let photo = "";
   let accent = "#7CFFB2";
 
-  try {
-    const { user, extra } = await getProfileBySlug(slug);
-    if (user?.name) name = user.name;
-    if (extra?.school) school = extra.school ?? "";
-    if (extra?.job_type) job = extra.job_type ?? "";
-    if (user?.photo_url) photo = user.photo_url ?? "";
-    if (user?.favorite_color) accent = user.favorite_color ?? accent;
-  } catch {
-    // return fallback image
+  // 1) fetch user by profile_slug
+  const users = await supabaseSelect<UserRow>("users", {
+    select: "user_id,name,role,profile_slug,photo_url,favorite_color",
+    profile_slug: `eq.${slug}`,
+    limit: "1",
+  });
+
+  const user = users[0];
+  if (user) {
+    name = user.name ?? name;
+    photo = user.photo_url ?? "";
+    accent = user.favorite_color ?? accent;
+
+    // 2) role-specific fetch
+    if (user.role === "mentor") {
+      const extra = await supabaseSelect<ExtraRow>("mentor_profiles", {
+        select: "school,job_type",
+        user_id: `eq.${user.user_id}`,
+        limit: "1",
+      });
+      school = extra[0]?.school ?? "";
+      job = extra[0]?.job_type ?? "";
+    } else if (user.role === "mentee") {
+      const extra = await supabaseSelect<ExtraRow>("mentee_profiles", {
+        select: "school,job_type",
+        user_id: `eq.${user.user_id}`,
+        limit: "1",
+      });
+      school = extra[0]?.school ?? "";
+      job = extra[0]?.job_type ?? "";
+    }
+  } else {
+    console.error("No user found for slug:", slug);
   }
 
   return new ImageResponse(
