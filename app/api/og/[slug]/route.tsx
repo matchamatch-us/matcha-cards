@@ -1,20 +1,51 @@
 import { ImageResponse } from "next/og";
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { getProfileBySlug } from "@/lib/getProfile";
 
 export const runtime = "edge";
 
+async function headImage(url: string) {
+  try {
+    const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+    const ct = res.headers.get("content-type") || "";
+    const ok =
+      res.ok &&
+      (ct.includes("jpeg") ||
+        ct.includes("jpg") ||
+        ct.includes("png") ||
+        ct.includes("webp"));
+    return { ok, status: res.status, contentType: ct };
+  } catch (e: any) {
+    return {
+      ok: false,
+      status: 0,
+      contentType: "",
+      error: String(e?.message || e),
+    };
+  }
+}
+
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ slug: string }> }
-) {
+): Promise<Response> {
   const { slug } = await context.params;
 
-  const debugMode = req.nextUrl.searchParams.get("debug") === "1";
+  const { searchParams } = new URL(req.url);
+  const debug = searchParams.get("debug") === "1";
 
-  const { user, extra, debug } = await getProfileBySlug(slug);
+  const { user, extra } = await getProfileBySlug(slug);
 
-  if (debugMode) {
+  const name = user?.name ?? "Matcha Match User";
+  const school = extra?.school ?? "";
+  const job = extra?.job_type ?? "";
+  const photoUrl = user?.photo_url ?? "";
+  const accent = (user as any)?.favorite_color ?? "#7CFFB2";
+
+  const photoHead = photoUrl ? await headImage(photoUrl) : null;
+  const safePhoto = photoHead?.ok ? photoUrl : "";
+
+  if (debug) {
     return Response.json({
       slug,
       userFound: !!user,
@@ -25,20 +56,14 @@ export async function GET(
             role: user.role,
             profile_slug: user.profile_slug,
             photo_url: user.photo_url,
-            favorite_color: (user as any).favorite_color ?? null,
+            favorite_color: (user as any)?.favorite_color ?? null,
           }
         : null,
       extra,
-      debug,
+      photoHead,
+      safePhotoUsed: !!safePhoto,
     });
   }
-
-  // fallback
-  const name = user?.name ?? "Matcha Match User";
-  const school = extra?.school ?? "";
-  const job = extra?.job_type ?? "";
-  const photo = user?.photo_url ?? "";
-  const accent = ((user as any)?.favorite_color as string | null) ?? "#7CFFB2";
 
   return new ImageResponse(
     (
@@ -54,9 +79,11 @@ export async function GET(
           fontFamily: "system-ui",
         }}
       >
-        {photo ? (
+        {safePhoto ? (
           <img
-            src={photo}
+            src={safePhoto}
+            width="1080"
+            height="1920"
             style={{
               position: "absolute",
               inset: 0,
