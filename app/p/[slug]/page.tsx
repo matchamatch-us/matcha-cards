@@ -2,58 +2,46 @@ import type { Metadata } from "next";
 import { getProfileBySlug } from "@/lib/getProfile";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-function getBaseUrl() {
-  const raw = (process.env.SITE_URL || "https://matcha-cards.vercel.app").trim();
-  return raw.replace(/\/+$/, "");
+function baseUrl() {
+  // You already set SITE_URL in Vercel, so rely on it.
+  return (process.env.SITE_URL || "https://matcha-cards.vercel.app").replace(/\/$/, "");
 }
 
-function firstParamValue(v: string | string[] | undefined) {
-  return Array.isArray(v) ? v[0] : v;
-}
-
-function versionFromTimestamp(ts: string | null | undefined) {
-  if (!ts) return String(Date.now());
-  const t = Date.parse(ts);
-  return Number.isFinite(t) ? String(t) : String(Date.now());
-}
-
-export async function generateMetadata({
-  params,
-  searchParams,
-}: {
-  params: { slug: string };
-  searchParams: { [key: string]: string | string[] | undefined };
-}): Promise<Metadata> {
+export async function generateMetadata(
+  { params }: { params: { slug: string } }
+): Promise<Metadata> {
   const slug = params.slug;
-  const forcedV = (firstParamValue(searchParams.v) || "").trim();
+  const site = baseUrl();
 
-  const { user, extra } = await getProfileBySlug(slug);
+  // Always provide OG image, even if DB fetch fails
+  const ogImage = `${site}/api/og/${encodeURIComponent(slug)}?v=${Date.now()}`;
+  const url = `${site}/p/${encodeURIComponent(slug)}`;
 
-  const title = user?.name ? `${user.name} • Matcha Match` : "Matcha Match profile card";
-  const description =
-    extra?.school || extra?.job_type
-      ? `${extra?.school ?? ""}${extra?.school && extra?.job_type ? " • " : ""}${extra?.job_type ?? ""}`
-      : "Matcha Match profile card";
+  // Try to personalize title/desc, but never throw
+  let title = "Matcha Match profile";
+  let description = "Matcha Match profile card";
 
-  const baseUrl = getBaseUrl();
-  const canonical = `${baseUrl}/p/${slug}`;
-
-  const autoVersion = versionFromTimestamp(user?.card_last_generated_at);
-  const version = forcedV || autoVersion;
-
-  const ogImage = `${baseUrl}/api/og/${slug}?v=${encodeURIComponent(version)}`;
+  try {
+    const { user, extra } = await getProfileBySlug(slug);
+    if (user?.name) title = `${user.name} • Matcha Match`;
+    if (extra?.school || extra?.job_type) {
+      description = [extra?.school, extra?.job_type].filter(Boolean).join(" • ");
+    }
+  } catch (e) {
+    console.error("generateMetadata failed:", e);
+  }
 
   return {
     title,
     description,
-    alternates: { canonical },
     openGraph: {
       title,
       description,
-      url: canonical,
+      url,
       type: "website",
-      images: [{ url: ogImage }],
+      images: [{ url: ogImage, width: 1080, height: 1920 }],
     },
     twitter: {
       card: "summary_large_image",
@@ -64,54 +52,48 @@ export async function generateMetadata({
   };
 }
 
-export default async function ProfilePage({
-  params,
-}: {
-  params: { slug: string };
-}) {
+export default async function ProfilePage(
+  { params }: { params: { slug: string } }
+) {
   const slug = params.slug;
-  const { user, extra } = await getProfileBySlug(slug);
 
-  if (!user) {
-    return (
-      <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "system-ui" }}>
-        <div style={{ maxWidth: 520, width: "100%" }}>
-          <h1 style={{ fontSize: 24, marginBottom: 8 }}>Profile not found</h1>
-          <p style={{ opacity: 0.7, lineHeight: 1.4 }}>
-            No user matched <code>{slug}</code> in <code>users.profile_slug</code>.
-          </p>
+  try {
+    const { user, extra } = await getProfileBySlug(slug);
+
+    if (!user) {
+      return (
+        <div style={{ padding: 24, fontFamily: "system-ui" }}>
+          <h1>Profile not found</h1>
+          <p>That link may be invalid or expired.</p>
         </div>
-      </main>
-    );
-  }
+      );
+    }
 
-  const name = user.name || "Matcha Match User";
-  const photo = user.photo_url || "";
-  const school = extra?.school || "";
-  const job = extra?.job_type || "";
+    const name = user.name ?? "Matcha Match User";
+    const school = extra?.school ?? "";
+    const job = extra?.job_type ?? "";
+    const photo = user.photo_url ?? "";
 
-  return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-        background: "#0b0b0c",
-        fontFamily: "system-ui",
-      }}
-    >
-      <div style={{ width: "100%", maxWidth: 420 }}>
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "grid",
+          placeItems: "center",
+          padding: 24,
+          background: "#0b0b0b",
+          fontFamily: "system-ui",
+        }}
+      >
         <div
           style={{
-            width: "100%",
+            width: "min(420px, 92vw)",
             aspectRatio: "9 / 16",
-            borderRadius: 32,
+            borderRadius: 28,
             overflow: "hidden",
-            boxShadow: "0 30px 80px rgba(0,0,0,0.55)",
             position: "relative",
             background: "#111",
+            boxShadow: "0 20px 70px rgba(0,0,0,0.55)",
           }}
         >
           {photo ? (
@@ -133,36 +115,38 @@ export default async function ProfilePage({
               position: "absolute",
               inset: 0,
               background:
-                "linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0.0) 55%, rgba(0,0,0,0.45))",
+                "linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.1) 55%, rgba(0,0,0,0.65))",
             }}
           />
 
           <div
             style={{
               position: "absolute",
-              top: 28,
-              left: 24,
-              right: 24,
+              top: 26,
+              left: 26,
+              right: 26,
               textAlign: "center",
               color: "white",
             }}
           >
-            <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.1 }}>
+            <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.05 }}>
               {name}
             </div>
-            <div style={{ marginTop: 8, opacity: 0.9 }}>Connecting</div>
+            <div style={{ marginTop: 10, fontSize: 18, opacity: 0.9 }}>
+              Connecting
+            </div>
           </div>
 
           <div
             style={{
               position: "absolute",
-              bottom: 24,
-              left: 24,
-              right: 24,
+              left: 22,
+              right: 22,
+              bottom: 22,
               display: "flex",
               justifyContent: "space-between",
               alignItems: "flex-end",
-              gap: 16,
+              gap: 18,
               color: "white",
             }}
           >
@@ -175,20 +159,26 @@ export default async function ProfilePage({
               style={{
                 background: "rgba(255,255,255,0.92)",
                 color: "#000",
-                padding: "14px 18px",
-                borderRadius: 16,
+                padding: "12px 16px",
+                borderRadius: 14,
+                fontSize: 16,
                 fontWeight: 900,
+                whiteSpace: "nowrap",
               }}
             >
               Connect Now
             </div>
           </div>
         </div>
-
-        <p style={{ color: "rgba(255,255,255,0.65)", fontSize: 13, marginTop: 12, textAlign: "center" }}>
-          This page exists mainly for iMessage previews (Open Graph).
-        </p>
+      </main>
+    );
+  } catch (e) {
+    console.error("ProfilePage failed:", e);
+    return (
+      <div style={{ padding: 24, fontFamily: "system-ui" }}>
+        <h1>Temporary error</h1>
+        <p>This profile card couldn’t load right now. Please try again.</p>
       </div>
-    </main>
-  );
+    );
+  }
 }
