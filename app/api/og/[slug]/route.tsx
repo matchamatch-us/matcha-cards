@@ -5,8 +5,10 @@ export const runtime = "edge";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { slug: string } }
+  context: { params: Promise<{ slug: string }> }
 ) {
+  const { slug } = await context.params;
+
   let name = "Matcha Match User";
   let school = "";
   let job = "";
@@ -14,14 +16,14 @@ export async function GET(
   let accent = "#7CFFB2";
 
   try {
-    const { user, extra } = await getProfileBySlug(params.slug);
+    const { user, extra } = await getProfileBySlug(slug);
     if (user?.name) name = user.name;
     if (extra?.school) school = extra.school ?? "";
     if (extra?.job_type) job = extra.job_type ?? "";
     if (user?.photo_url) photo = user.photo_url ?? "";
     if (user?.favorite_color) accent = user.favorite_color ?? accent;
-  } catch (_e) {
-    // swallow errors and still return an image
+  } catch {
+    // return fallback image
   }
 
   return new ImageResponse(
