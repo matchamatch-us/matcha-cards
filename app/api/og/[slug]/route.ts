@@ -16,15 +16,21 @@ async function headImage(url: string) {
         ct.includes("webp"));
     return { ok, status: res.status, contentType: ct };
   } catch (e: any) {
-    return { ok: false, status: 0, contentType: "", error: String(e?.message || e) };
+    return {
+      ok: false,
+      status: 0,
+      contentType: "",
+      error: String(e?.message || e),
+    };
   }
 }
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  context: { params: Promise<{ slug: string }> }
 ): Promise<Response> {
-  const slug = params.slug;
+  const { slug } = await context.params;
+
   const { searchParams } = new URL(req.url);
   const debug = searchParams.get("debug") === "1";
 
@@ -36,7 +42,6 @@ export async function GET(
   const photoUrl = user?.photo_url ?? "";
   const accent = (user as any)?.favorite_color ?? "#7CFFB2";
 
-  // Guard against @vercel/og crashing on unsupported/blocked image types
   const photoHead = photoUrl ? await headImage(photoUrl) : null;
   const safePhoto = photoHead?.ok ? photoUrl : "";
 
@@ -44,9 +49,17 @@ export async function GET(
     return Response.json({
       slug,
       userFound: !!user,
-      user,
+      user: user
+        ? {
+            user_id: user.user_id,
+            name: user.name,
+            role: user.role,
+            profile_slug: user.profile_slug,
+            photo_url: user.photo_url,
+            favorite_color: (user as any)?.favorite_color ?? null,
+          }
+        : null,
       extra,
-      photoUrl,
       photoHead,
       safePhotoUsed: !!safePhoto,
     });
@@ -66,7 +79,6 @@ export async function GET(
           fontFamily: "system-ui",
         }}
       >
-        {/* Background photo (only if verified renderable) */}
         {safePhoto ? (
           <img
             src={safePhoto}
@@ -82,7 +94,6 @@ export async function GET(
           />
         ) : null}
 
-        {/* Dark gradient overlay */}
         <div
           style={{
             position: "absolute",
@@ -92,7 +103,6 @@ export async function GET(
           }}
         />
 
-        {/* Top */}
         <div
           style={{
             position: "absolute",
@@ -125,7 +135,6 @@ export async function GET(
           </div>
         </div>
 
-        {/* Bottom */}
         <div
           style={{
             position: "absolute",
