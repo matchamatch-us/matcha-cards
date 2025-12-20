@@ -5,21 +5,33 @@ type UserRow = {
   name: string | null;
   role: "mentor" | "mentee" | null;
   profile_slug: string | null;
+
   photo_url: string | null;
+  favorite_color: string | null;
+
   card_full_url: string | null;
   card_og_url: string | null;
-  card_status: string | null;
-  card_last_generated_at: string | null;
+
+  updated_at: string | null;
 };
 
 export async function getProfileBySlug(slug: string) {
   const supabase = supabaseServer();
 
-  // Fetch the user by slug
   const { data: user, error: userErr } = await supabase
     .from("users")
     .select(
-      "user_id, name, role, profile_slug, photo_url, card_full_url, card_og_url, card_status, card_last_generated_at"
+      [
+        "user_id",
+        "name",
+        "role",
+        "profile_slug",
+        "photo_url",
+        "favorite_color",
+        "card_full_url",
+        "card_og_url",
+        "updated_at",
+      ].join(",")
     )
     .eq("profile_slug", slug)
     .maybeSingle<UserRow>();
@@ -27,7 +39,6 @@ export async function getProfileBySlug(slug: string) {
   if (userErr) throw userErr;
   if (!user) return { user: null, extra: null };
 
-  // Fetch role-specific fields
   let extra: { school?: string | null; job_type?: string | null } | null = null;
 
   if (user.role === "mentor") {
@@ -52,4 +63,3 @@ export async function getProfileBySlug(slug: string) {
 
   return { user, extra };
 }
-
