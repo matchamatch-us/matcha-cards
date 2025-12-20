@@ -11,8 +11,7 @@ type UserRow = {
 
   card_full_url: string | null;
   card_og_url: string | null;
-
-  updated_at: string | null;
+  card_last_generated_at: string | null;
 };
 
 export async function getProfileBySlug(slug: string) {
@@ -30,7 +29,7 @@ export async function getProfileBySlug(slug: string) {
         "favorite_color",
         "card_full_url",
         "card_og_url",
-        "updated_at",
+        "card_last_generated_at",
       ].join(",")
     )
     .eq("profile_slug", slug)

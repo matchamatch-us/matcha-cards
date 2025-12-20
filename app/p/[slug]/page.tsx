@@ -8,18 +8,25 @@ function getBaseUrl() {
   return raw.replace(/\/+$/, "");
 }
 
+function firstParamValue(v: string | string[] | undefined) {
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function versionFromTimestamp(ts: string | null | undefined) {
+  if (!ts) return String(Date.now());
+  const t = Date.parse(ts);
+  return Number.isFinite(t) ? String(t) : String(Date.now());
+}
+
 export async function generateMetadata({
   params,
   searchParams,
 }: {
-  params: Promise<{ slug: string }>;
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+  params: { slug: string };
+  searchParams: { [key: string]: string | string[] | undefined };
 }): Promise<Metadata> {
-  const { slug } = await params;
-  const sp = await searchParams;
-
-  const forcedVRaw = Array.isArray(sp.v) ? sp.v[0] : sp.v;
-  const forcedV = (forcedVRaw ?? "").trim();
+  const slug = params.slug;
+  const forcedV = (firstParamValue(searchParams.v) || "").trim();
 
   const { user, extra } = await getProfileBySlug(slug);
 
@@ -32,19 +39,10 @@ export async function generateMetadata({
   const baseUrl = getBaseUrl();
   const canonical = `${baseUrl}/p/${slug}`;
 
-  // Version for cache-busting:
-  // 1) if user texted /p/<slug>?v=123 -> use that
-  // 2) else use card_last_generated_at if present
-  // 3) else fall back to updated_at
-  // 4) else Date.now
-  const autoV =
-    (user as any)?.card_last_generated_at ||
-    user?.updated_at ||
-    String(Date.now());
+  const autoVersion = versionFromTimestamp(user?.card_last_generated_at);
+  const version = forcedV || autoVersion;
 
-  const version = forcedV || String(new Date(autoV).getTime ? new Date(autoV).getTime() : autoV);
-
-  const ogImage = `${baseUrl}/api/og/${slug}?v=${encodeURIComponent(String(version))}`;
+  const ogImage = `${baseUrl}/api/og/${slug}?v=${encodeURIComponent(version)}`;
 
   return {
     title,
@@ -69,9 +67,9 @@ export async function generateMetadata({
 export default async function ProfilePage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: { slug: string };
 }) {
-  const { slug } = await params;
+  const slug = params.slug;
   const { user, extra } = await getProfileBySlug(slug);
 
   if (!user) {

@@ -5,16 +5,24 @@ export const runtime = "edge";
 
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ slug: string }> }
+  { params }: { params: { slug: string } }
 ) {
-  const { slug } = await params;
-  const { user, extra } = await getProfileBySlug(slug);
+  let name = "Matcha Match User";
+  let school = "";
+  let job = "";
+  let photo = "";
+  let accent = "#7CFFB2";
 
-  const name = user?.name ?? "Matcha Match User";
-  const school = extra?.school ?? "";
-  const job = extra?.job_type ?? "";
-  const photo = user?.photo_url ?? "";
-  const accent = user?.favorite_color ?? "#7CFFB2";
+  try {
+    const { user, extra } = await getProfileBySlug(params.slug);
+    if (user?.name) name = user.name;
+    if (extra?.school) school = extra.school ?? "";
+    if (extra?.job_type) job = extra.job_type ?? "";
+    if (user?.photo_url) photo = user.photo_url ?? "";
+    if (user?.favorite_color) accent = user.favorite_color ?? accent;
+  } catch (_e) {
+    // swallow errors and still return an image
+  }
 
   return new ImageResponse(
     (
