@@ -1,71 +1,44 @@
 import { ImageResponse } from "next/og";
+import { NextRequest } from "next/server";
 import { getProfileBySlug } from "@/lib/getProfile";
 
 export const runtime = "edge";
 
 export async function GET(
-  req: Request,
-  { params }: { params: { slug: string } }
+  req: NextRequest,
+  context: { params: Promise<{ slug: string }> }
 ) {
-  const urlObj = new URL(req.url);
-  const debugMode = urlObj.searchParams.get("debug") === "1";
+  const { slug } = await context.params;
 
-  const slug = params.slug;
+  const debugMode = req.nextUrl.searchParams.get("debug") === "1";
 
-  // defaults
-  let name = "Matcha Match User";
-  let school = "";
-  let job = "";
-  let photo = "";
-  let accent = "#7CFFB2";
+  const { user, extra, debug } = await getProfileBySlug(slug);
 
-  try {
-    const { user, extra, debug } = await getProfileBySlug(slug);
-
-    if (debugMode) {
-      return Response.json({
-        slug,
-        env: {
-          SUPABASE_URL: !!process.env.SUPABASE_URL,
-          SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-        },
-        debug,
-        userFound: !!user,
-        user: user
-          ? {
-              user_id: user.user_id,
-              name: user.name,
-              role: user.role,
-              profile_slug: user.profile_slug,
-              photo_url: user.photo_url,
-              favorite_color: user.favorite_color,
-            }
-          : null,
-        extra,
-      });
-    }
-
-    if (user) {
-      name = user.name ?? name;
-      photo = user.photo_url ?? "";
-      accent = user.favorite_color ?? accent;
-    }
-    if (extra) {
-      school = extra.school ?? "";
-      job = extra.job_type ?? "";
-    }
-  } catch (e: any) {
-    if (debugMode) {
-      return Response.json({
-        slug,
-        error: e?.message || String(e),
-        env: {
-          SUPABASE_URL: !!process.env.SUPABASE_URL,
-          SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-        },
-      });
-    }
+  if (debugMode) {
+    return Response.json({
+      slug,
+      userFound: !!user,
+      user: user
+        ? {
+            user_id: user.user_id,
+            name: user.name,
+            role: user.role,
+            profile_slug: user.profile_slug,
+            photo_url: user.photo_url,
+            favorite_color: (user as any).favorite_color ?? null,
+          }
+        : null,
+      extra,
+      debug,
+    });
   }
+
+  // fallback
+  const name = user?.name ?? "Matcha Match User";
+  const school = extra?.school ?? "";
+  const job = extra?.job_type ?? "";
+  const photo = user?.photo_url ?? "";
+  const accent = ((user as any)?.favorite_color as string | null) ?? "#7CFFB2";
 
   return new ImageResponse(
     (
