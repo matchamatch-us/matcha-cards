@@ -4,7 +4,9 @@ type UserRow = {
   role: "mentor" | "mentee" | null;
   profile_slug: string | null;
   photo_url: string | null;
-  favorite_color: string | null;
+
+  // optional (may or may not exist yet)
+  favorite_color?: string | null;
 
   card_full_url: string | null;
   card_og_url: string | null;
@@ -31,10 +33,9 @@ async function restSelect<T>(
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const safeUrl = supabaseUrl ? supabaseUrl.replace(/\/$/, "") : "";
-
+  const base = supabaseUrl ? supabaseUrl.replace(/\/$/, "") : "";
   const qs = new URLSearchParams(query);
-  const url = `${safeUrl}/rest/v1/${table}?${qs.toString()}`;
+  const url = `${base}/rest/v1/${table}?${qs.toString()}`;
 
   if (!supabaseUrl || !serviceKey) {
     return {
@@ -78,53 +79,39 @@ async function restSelect<T>(
         ok: false,
         status: res.status,
         url,
-        bodySnippet: text.slice(0, 300),
+        bodySnippet: text.slice(0, 400),
       },
     };
   }
 
   const json = (await res.json()) as T[];
-  return {
-    data: json,
-    debug: { ok: true, status: res.status, url },
-  };
+  return { data: json, debug: { ok: true, status: res.status, url } };
 }
 
 export async function getProfileBySlug(slug: string): Promise<{
   user: UserRow | null;
   extra: ExtraRow | null;
-  debug: {
-    users: RestDebug;
-    extra?: RestDebug;
-  };
+  debug: { users: RestDebug; extra?: RestDebug };
 }> {
-  // 1) fetch user by profile_slug
+  // IMPORTANT: select=* so missing/new columns (like favorite_color) never hard-fail
   const usersRes = await restSelect<UserRow>("users", {
-    select:
-      "user_id,name,role,profile_slug,photo_url,favorite_color,card_full_url,card_og_url,card_status,card_last_generated_at",
+    select: "*",
     profile_slug: `eq.${slug}`,
     limit: "1",
   });
 
   const user = usersRes.data[0] ?? null;
 
-  // If user doesn’t exist, return cleanly
   if (!user) {
-    return {
-      user: null,
-      extra: null,
-      debug: { users: usersRes.debug },
-    };
+    return { user: null, extra: null, debug: { users: usersRes.debug } };
   }
 
-  // 2) role-specific fetch
   if (user.role === "mentor") {
     const extraRes = await restSelect<ExtraRow>("mentor_profiles", {
       select: "school,job_type",
       user_id: `eq.${user.user_id}`,
       limit: "1",
     });
-
     return {
       user,
       extra: extraRes.data[0] ?? null,
@@ -138,7 +125,6 @@ export async function getProfileBySlug(slug: string): Promise<{
       user_id: `eq.${user.user_id}`,
       limit: "1",
     });
-
     return {
       user,
       extra: extraRes.data[0] ?? null,
@@ -146,9 +132,5 @@ export async function getProfileBySlug(slug: string): Promise<{
     };
   }
 
-  return {
-    user,
-    extra: null,
-    debug: { users: usersRes.debug },
-  };
+  return { user, extra: null, debug: { users: usersRes.debug } };
 }
