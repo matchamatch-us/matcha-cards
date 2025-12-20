@@ -1,4 +1,4 @@
-import { ImageResponse } from "@vercel/og";
+import { ImageResponse } from "next/og";
 import type { NextRequest } from "next/server";
 import { getProfileBySlug } from "@/lib/getProfile";
 
