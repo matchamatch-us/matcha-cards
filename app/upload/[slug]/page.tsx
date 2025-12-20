@@ -1,116 +1,105 @@
-"use client";
+export const dynamic = "force-dynamic";
 
-import { useMemo, useState } from "react";
+type MaybePromise<T> = T | Promise<T>;
 
-export default function UploadPage({
-  params,
-  searchParams,
-}: {
-  params: { slug: string };
-  searchParams: { token?: string };
+export default async function UploadPage(props: {
+  params: MaybePromise<{ slug: string }>;
+  searchParams?: MaybePromise<{ token?: string }>;
 }) {
-  const slug = params.slug;
-  const token = searchParams?.token || "";
+  const { slug } = await props.params;
+  const sp = (await props.searchParams) ?? {};
+  const token = sp.token ?? "";
 
-  const endpoint = useMemo(() => {
-    const t = encodeURIComponent(token);
-    return `/api/upload?slug=${encodeURIComponent(slug)}&token=${t}`;
-  }, [slug, token]);
-
-  const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<string>("");
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!file) return;
-
-    setStatus("Uploading...");
-
-    const fd = new FormData();
-    fd.append("file", file);
-
-    const res = await fetch(endpoint, {
-      method: "POST",
-      body: fd,
-    });
-
-    const json = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      setStatus(`Error: ${json?.error || "Upload failed"}`);
-      return;
-    }
-
-    setStatus("Uploaded! Generating preview…");
-
-    // After upload, take them to their profile (with cache-bust)
-    const v = Date.now();
-    window.location.href = `/p/${encodeURIComponent(slug)}?v=${v}`;
-  }
+  const action = `/api/upload?slug=${encodeURIComponent(
+    slug
+  )}&token=${encodeURIComponent(token)}`;
 
   return (
     <main
       style={{
         minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
         padding: 24,
         background: "#0b0b0b",
         color: "white",
-        fontFamily: "system-ui",
+        fontFamily:
+          'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
       }}
     >
-      <div style={{ width: "min(520px, 92vw)" }}>
-        <h1 style={{ fontSize: 28, fontWeight: 900, marginBottom: 10 }}>
+      <div style={{ width: "min(760px, 92vw)" }}>
+        <h1 style={{ fontSize: 56, margin: 0, fontWeight: 800 }}>
           Upload your photo
         </h1>
-        <p style={{ opacity: 0.85, marginBottom: 18 }}>
+        <p style={{ marginTop: 14, fontSize: 22, opacity: 0.85 }}>
           This photo will be used on your Matcha Match profile card.
         </p>
 
         {!token ? (
           <div
             style={{
-              background: "rgba(255,255,255,0.1)",
-              padding: 16,
-              borderRadius: 14,
+              marginTop: 28,
+              padding: "18px 20px",
+              borderRadius: 18,
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.10)",
+              fontSize: 18,
+              opacity: 0.95,
             }}
           >
             Missing token in URL. Please use the link you were texted.
           </div>
         ) : (
           <form
-            onSubmit={onSubmit}
+            action={action}
+            method="POST"
+            encType="multipart/form-data"
             style={{
+              marginTop: 30,
+              padding: 24,
+              borderRadius: 22,
               background: "rgba(255,255,255,0.06)",
-              padding: 18,
-              borderRadius: 16,
-              border: "1px solid rgba(255,255,255,0.12)",
+              border: "1px solid rgba(255,255,255,0.10)",
             }}
           >
             <input
+              name="file"
               type="file"
               accept="image/*"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              style={{ display: "block", marginBottom: 14 }}
-            />
-            <button
-              type="submit"
-              disabled={!file}
+              required
               style={{
                 width: "100%",
-                padding: "12px 14px",
-                borderRadius: 12,
-                fontWeight: 900,
+                padding: 18,
+                borderRadius: 16,
+                background: "rgba(0,0,0,0.35)",
+                border: "1px solid rgba(255,255,255,0.10)",
+                color: "white",
+                fontSize: 18,
+              }}
+            />
+
+            <button
+              type="submit"
+              style={{
+                marginTop: 18,
+                width: "100%",
+                padding: "16px 18px",
+                borderRadius: 16,
+                background: "white",
+                color: "black",
                 border: "none",
-                cursor: file ? "pointer" : "not-allowed",
+                fontSize: 20,
+                fontWeight: 800,
+                cursor: "pointer",
               }}
             >
-              Upload
+              Upload Photo
             </button>
-            {status ? (
-              <div style={{ marginTop: 14, opacity: 0.9 }}>{status}</div>
-            ) : null}
+
+            <p style={{ marginTop: 16, opacity: 0.7 }}>
+              If you have trouble, try a smaller image or a different browser.
+            </p>
           </form>
         )}
       </div>
