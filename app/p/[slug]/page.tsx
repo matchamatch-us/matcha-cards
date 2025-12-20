@@ -23,20 +23,22 @@ export async function generateMetadata({
       : "Matcha Match profile card";
 
   const baseUrl = getBaseUrl();
-  const url = `${baseUrl}/p/${slug}`;
-  const ogImage =
-    user?.card_og_url ||
-    process.env.DEFAULT_OG_IMAGE ||
-    `${baseUrl}/default-og.png`;
+  const canonical = `${baseUrl}/p/${slug}`;
+
+  // version for cache-busting (iMessage preview refresh)
+  const version =
+    user?.updated_at ? String(new Date(user.updated_at).getTime()) : String(Date.now());
+
+  const ogImage = `${baseUrl}/api/og/${slug}?v=${encodeURIComponent(version)}`;
 
   return {
     title,
     description,
-    alternates: { canonical: url },
+    alternates: { canonical },
     openGraph: {
       title,
       description,
-      url,
+      url: canonical,
       type: "website",
       images: [{ url: ogImage }],
     },
@@ -57,7 +59,6 @@ export default async function ProfilePage({
   const { slug } = await params;
   const { user, extra } = await getProfileBySlug(slug);
 
-  // Instead of hard 404, show a helpful debug page (for now)
   if (!user) {
     return (
       <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "system-ui" }}>
@@ -112,21 +113,7 @@ export default async function ProfilePage({
                 objectFit: "cover",
               }}
             />
-          ) : (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "white",
-                opacity: 0.7,
-              }}
-            >
-              No photo yet
-            </div>
-          )}
+          ) : null}
 
           <div
             style={{
@@ -147,14 +134,7 @@ export default async function ProfilePage({
               color: "white",
             }}
           >
-            <div
-              style={{
-                fontSize: 34,
-                fontWeight: 800,
-                lineHeight: 1.1,
-                textShadow: "0 8px 20px rgba(0,0,0,0.45)",
-              }}
-            >
+            <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.1 }}>
               {name}
             </div>
             <div style={{ marginTop: 8, opacity: 0.9 }}>Connecting</div>
@@ -174,7 +154,7 @@ export default async function ProfilePage({
             }}
           >
             <div>
-              <div style={{ fontSize: 22, fontWeight: 800 }}>{school}</div>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>{school}</div>
               <div style={{ fontSize: 16, opacity: 0.9 }}>{job}</div>
             </div>
 
@@ -184,7 +164,7 @@ export default async function ProfilePage({
                 color: "#000",
                 padding: "14px 18px",
                 borderRadius: 16,
-                fontWeight: 800,
+                fontWeight: 900,
               }}
             >
               Connect Now
@@ -193,7 +173,7 @@ export default async function ProfilePage({
         </div>
 
         <p style={{ color: "rgba(255,255,255,0.65)", fontSize: 13, marginTop: 12, textAlign: "center" }}>
-          This page exists mainly for iMessage link previews (Open Graph).
+          This page exists mainly for iMessage previews (Open Graph).
         </p>
       </div>
     </main>
