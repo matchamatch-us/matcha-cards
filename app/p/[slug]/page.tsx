@@ -10,10 +10,17 @@ function getBaseUrl() {
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }): Promise<Metadata> {
   const { slug } = await params;
+  const sp = await searchParams;
+
+  const forcedVRaw = Array.isArray(sp.v) ? sp.v[0] : sp.v;
+  const forcedV = (forcedVRaw ?? "").trim();
+
   const { user, extra } = await getProfileBySlug(slug);
 
   const title = user?.name ? `${user.name} • Matcha Match` : "Matcha Match profile card";
@@ -25,11 +32,19 @@ export async function generateMetadata({
   const baseUrl = getBaseUrl();
   const canonical = `${baseUrl}/p/${slug}`;
 
-  // version for cache-busting (iMessage preview refresh)
-  const version =
-    user?.updated_at ? String(new Date(user.updated_at).getTime()) : String(Date.now());
+  // Version for cache-busting:
+  // 1) if user texted /p/<slug>?v=123 -> use that
+  // 2) else use card_last_generated_at if present
+  // 3) else fall back to updated_at
+  // 4) else Date.now
+  const autoV =
+    (user as any)?.card_last_generated_at ||
+    user?.updated_at ||
+    String(Date.now());
 
-  const ogImage = `${baseUrl}/api/og/${slug}?v=${encodeURIComponent(version)}`;
+  const version = forcedV || String(new Date(autoV).getTime ? new Date(autoV).getTime() : autoV);
+
+  const ogImage = `${baseUrl}/api/og/${slug}?v=${encodeURIComponent(String(version))}`;
 
   return {
     title,
