@@ -1,64 +1,154 @@
-import { supabaseServer } from "@/lib/supabaseServer";
-
 type UserRow = {
   user_id: string;
   name: string | null;
   role: "mentor" | "mentee" | null;
   profile_slug: string | null;
-
   photo_url: string | null;
   favorite_color: string | null;
 
   card_full_url: string | null;
   card_og_url: string | null;
+  card_status: string | null;
   card_last_generated_at: string | null;
 };
 
-export async function getProfileBySlug(slug: string) {
-  const supabase = supabaseServer();
+type ExtraRow = {
+  school: string | null;
+  job_type: string | null;
+};
 
-  const { data: user, error: userErr } = await supabase
-    .from("users")
-    .select(
-      [
-        "user_id",
-        "name",
-        "role",
-        "profile_slug",
-        "photo_url",
-        "favorite_color",
-        "card_full_url",
-        "card_og_url",
-        "card_last_generated_at",
-      ].join(",")
-    )
-    .eq("profile_slug", slug)
-    .maybeSingle<UserRow>();
+type RestDebug = {
+  ok: boolean;
+  status: number;
+  url: string;
+  bodySnippet?: string;
+};
 
-  if (userErr) throw userErr;
-  if (!user) return { user: null, extra: null };
+async function restSelect<T>(
+  table: string,
+  query: Record<string, string>
+): Promise<{ data: T[]; debug: RestDebug }> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  let extra: { school?: string | null; job_type?: string | null } | null = null;
+  const safeUrl = supabaseUrl ? supabaseUrl.replace(/\/$/, "") : "";
 
-  if (user.role === "mentor") {
-    const { data, error } = await supabase
-      .from("mentor_profiles")
-      .select("school, job_type")
-      .eq("user_id", user.user_id)
-      .maybeSingle();
+  const qs = new URLSearchParams(query);
+  const url = `${safeUrl}/rest/v1/${table}?${qs.toString()}`;
 
-    if (error) throw error;
-    extra = data;
-  } else if (user.role === "mentee") {
-    const { data, error } = await supabase
-      .from("mentee_profiles")
-      .select("school, job_type")
-      .eq("user_id", user.user_id)
-      .maybeSingle();
-
-    if (error) throw error;
-    extra = data;
+  if (!supabaseUrl || !serviceKey) {
+    return {
+      data: [],
+      debug: {
+        ok: false,
+        status: 0,
+        url,
+        bodySnippet: `Missing env vars: SUPABASE_URL=${!!supabaseUrl} SUPABASE_SERVICE_ROLE_KEY=${!!serviceKey}`,
+      },
+    };
   }
 
-  return { user, extra };
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        apikey: serviceKey,
+        authorization: `Bearer ${serviceKey}`,
+        "content-type": "application/json",
+      },
+      cache: "no-store",
+    });
+  } catch (e: any) {
+    return {
+      data: [],
+      debug: {
+        ok: false,
+        status: 0,
+        url,
+        bodySnippet: `Fetch threw: ${e?.message || String(e)}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    return {
+      data: [],
+      debug: {
+        ok: false,
+        status: res.status,
+        url,
+        bodySnippet: text.slice(0, 300),
+      },
+    };
+  }
+
+  const json = (await res.json()) as T[];
+  return {
+    data: json,
+    debug: { ok: true, status: res.status, url },
+  };
+}
+
+export async function getProfileBySlug(slug: string): Promise<{
+  user: UserRow | null;
+  extra: ExtraRow | null;
+  debug: {
+    users: RestDebug;
+    extra?: RestDebug;
+  };
+}> {
+  // 1) fetch user by profile_slug
+  const usersRes = await restSelect<UserRow>("users", {
+    select:
+      "user_id,name,role,profile_slug,photo_url,favorite_color,card_full_url,card_og_url,card_status,card_last_generated_at",
+    profile_slug: `eq.${slug}`,
+    limit: "1",
+  });
+
+  const user = usersRes.data[0] ?? null;
+
+  // If user doesn’t exist, return cleanly
+  if (!user) {
+    return {
+      user: null,
+      extra: null,
+      debug: { users: usersRes.debug },
+    };
+  }
+
+  // 2) role-specific fetch
+  if (user.role === "mentor") {
+    const extraRes = await restSelect<ExtraRow>("mentor_profiles", {
+      select: "school,job_type",
+      user_id: `eq.${user.user_id}`,
+      limit: "1",
+    });
+
+    return {
+      user,
+      extra: extraRes.data[0] ?? null,
+      debug: { users: usersRes.debug, extra: extraRes.debug },
+    };
+  }
+
+  if (user.role === "mentee") {
+    const extraRes = await restSelect<ExtraRow>("mentee_profiles", {
+      select: "school,job_type",
+      user_id: `eq.${user.user_id}`,
+      limit: "1",
+    });
+
+    return {
+      user,
+      extra: extraRes.data[0] ?? null,
+      debug: { users: usersRes.debug, extra: extraRes.debug },
+    };
+  }
+
+  return {
+    user,
+    extra: null,
+    debug: { users: usersRes.debug },
+  };
 }
