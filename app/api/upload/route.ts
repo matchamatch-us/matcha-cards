@@ -25,8 +25,23 @@ function publicPhotoUrl(slug: string) {
   )}.jpg`;
 }
 
-function isHeic(mime: string, filename: string) {
-  const lower = filename.toLowerCase();
+// HEIC sniff: ISO BMFF files contain "ftyp" + brand like "heic"/"heif"/"mif1"/"heix"/"hevc"
+function looksLikeHeic(buf: Buffer) {
+  if (!buf || buf.length < 16) return false;
+  const head = buf.subarray(0, 64).toString("latin1");
+  // typical brands that indicate HEIF/HEIC container
+  return (
+    head.includes("ftypheic") ||
+    head.includes("ftypheif") ||
+    head.includes("ftypheix") ||
+    head.includes("ftyphevc") ||
+    head.includes("ftypmif1") ||
+    head.includes("ftypmsf1")
+  );
+}
+
+function isHeicByMeta(mime: string, filename: string) {
+  const lower = (filename || "").toLowerCase();
   return (
     mime === "image/heic" ||
     mime === "image/heif" ||
@@ -41,14 +56,10 @@ export async function POST(req: NextRequest) {
     const slug = url.searchParams.get("slug");
     const token = url.searchParams.get("token");
 
-    if (!slug) {
-      return Response.json({ error: "Missing slug" }, { status: 400 });
-    }
-    if (!token) {
-      return Response.json({ error: "Missing token" }, { status: 400 });
-    }
+    if (!slug) return Response.json({ error: "Missing slug" }, { status: 400 });
+    if (!token) return Response.json({ error: "Missing token" }, { status: 400 });
 
-    // Validate upload token by reading users row
+    // Validate upload token
     const uRes = await supabaseRest(
       `/rest/v1/users?select=user_id,profile_slug,upload_token&profile_slug=eq.${encodeURIComponent(
         slug
@@ -57,9 +68,7 @@ export async function POST(req: NextRequest) {
     const uJson = await uRes.json().catch(() => []);
     const user = Array.isArray(uJson) ? uJson[0] : null;
 
-    if (!user) {
-      return Response.json({ error: "Invalid slug" }, { status: 404 });
-    }
+    if (!user) return Response.json({ error: "Invalid slug" }, { status: 404 });
     if (!user.upload_token || user.upload_token !== token) {
       return Response.json({ error: "Invalid token" }, { status: 401 });
     }
@@ -71,16 +80,18 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: "Missing file" }, { status: 400 });
     }
 
-    const mime = file.type || "application/octet-stream";
+    const mime = file.type || ""; // sometimes empty
     const filename = file.name || "upload";
 
     const buf = Buffer.from(await file.arrayBuffer());
 
-    let outBuf = buf;
-    let outMime = mime;
+    const shouldConvertHeic = isHeicByMeta(mime, filename) || looksLikeHeic(buf);
 
-    // Convert HEIC/HEIF -> JPEG
-    if (isHeic(mime, filename)) {
+    let outBuf = buf;
+    let outMime = mime || "application/octet-stream";
+    let convertedFromHeic = false;
+
+    if (shouldConvertHeic) {
       const heicConvert = (await import("heic-convert")).default;
       outBuf = Buffer.from(
         await heicConvert({
@@ -90,20 +101,28 @@ export async function POST(req: NextRequest) {
         })
       );
       outMime = "image/jpeg";
-    } else if (
-      mime !== "image/jpeg" &&
-      mime !== "image/png" &&
-      mime !== "image/webp"
-    ) {
-      // If it's some other image type, still store but force jpeg would be better.
-      // For now just reject to keep OG reliable.
-      return Response.json(
-        { error: `Unsupported image type: ${mime}. Please upload JPG/PNG/WebP.` },
-        { status: 400 }
-      );
+      convertedFromHeic = true;
+    } else {
+      // Allow only OG-safe formats if not HEIC
+      const ok =
+        outMime === "image/jpeg" ||
+        outMime === "image/jpg" ||
+        outMime === "image/png" ||
+        outMime === "image/webp";
+
+      if (!ok) {
+        return Response.json(
+          { error: `Unsupported image type: ${outMime || "(empty)"} — please upload JPG/PNG/WebP.` },
+          { status: 400 }
+        );
+      }
+
+      // normalize jpg
+      if (outMime === "image/jpg") outMime = "image/jpeg";
     }
 
-    // Upload to Supabase Storage: profile-photos bucket
+    // Upload as .jpg (even if original was png/webp, still okay for now — but we’ll keep bytes as-is)
+    // If you want to always convert everything to jpg, tell me and I’ll do it.
     const objectPath = `photos/${slug}.jpg`;
 
     const upRes = await supabaseRest(
@@ -120,23 +139,23 @@ export async function POST(req: NextRequest) {
 
     if (!upRes.ok) {
       const text = await upRes.text().catch(() => "");
-      return Response.json(
-        { error: "Upload failed", details: text },
-        { status: 500 }
-      );
+      return Response.json({ error: "Upload failed", details: text }, { status: 500 });
     }
 
     const photo_url = publicPhotoUrl(slug);
 
-    // Update users.photo_url to the new jpg URL
-    const patchRes = await supabaseRest(`/rest/v1/users?profile_slug=eq.${encodeURIComponent(slug)}`, {
-      method: "PATCH",
-      headers: {
-        "content-type": "application/json",
-        prefer: "return=minimal",
-      },
-      body: JSON.stringify({ photo_url }),
-    });
+    // Update users.photo_url to public jpg URL
+    const patchRes = await supabaseRest(
+      `/rest/v1/users?profile_slug=eq.${encodeURIComponent(slug)}`,
+      {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          prefer: "return=minimal",
+        },
+        body: JSON.stringify({ photo_url }),
+      }
+    );
 
     if (!patchRes.ok) {
       const text = await patchRes.text().catch(() => "");
@@ -149,13 +168,14 @@ export async function POST(req: NextRequest) {
     return Response.json({
       ok: true,
       slug,
+      filename,
+      mime,
+      detectedHeic: shouldConvertHeic,
+      convertedFromHeic,
+      storedContentType: outMime,
       photo_url,
-      convertedFromHeic: isHeic(mime, filename),
     });
   } catch (e: any) {
-    return Response.json(
-      { error: e?.message || String(e) },
-      { status: 500 }
-    );
+    return Response.json({ error: e?.message || String(e) }, { status: 500 });
   }
 }
