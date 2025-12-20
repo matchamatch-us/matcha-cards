@@ -1,4 +1,4 @@
-import { ImageResponse } from "@vercel/og";
+import { ImageResponse } from "next/og";
 import { getProfileBySlug } from "@/lib/getProfile";
 
 export const runtime = "edge";
@@ -10,15 +10,12 @@ export async function GET(
   const { slug } = await params;
   const { user, extra } = await getProfileBySlug(slug);
 
-  // fallback
   const name = user?.name ?? "Matcha Match User";
   const school = extra?.school ?? "";
   const job = extra?.job_type ?? "";
   const photo = user?.photo_url ?? "";
   const accent = user?.favorite_color ?? "#7CFFB2";
 
-  // Note: image must be publicly fetchable
-  // Supabase public URLs work great.
   return new ImageResponse(
     (
       <div
@@ -33,7 +30,6 @@ export async function GET(
           fontFamily: "system-ui",
         }}
       >
-        {/* Background photo */}
         {photo ? (
           <img
             src={photo}
@@ -47,7 +43,6 @@ export async function GET(
           />
         ) : null}
 
-        {/* Dark gradient overlay */}
         <div
           style={{
             position: "absolute",
@@ -57,7 +52,6 @@ export async function GET(
           }}
         />
 
-        {/* Top */}
         <div
           style={{
             position: "absolute",
@@ -90,7 +84,6 @@ export async function GET(
           </div>
         </div>
 
-        {/* Bottom */}
         <div
           style={{
             position: "absolute",
@@ -124,9 +117,6 @@ export async function GET(
         </div>
       </div>
     ),
-    {
-      width: 1080,
-      height: 1920,
-    }
+    { width: 1080, height: 1920 }
   );
 }
