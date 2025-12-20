@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import type { NextRequest } from "next/server";
+import React from "react";
 import { getProfileBySlug } from "@/lib/getProfile";
 
 export const runtime = "edge";
@@ -24,6 +25,8 @@ async function headImage(url: string) {
     };
   }
 }
+
+const h = React.createElement;
 
 export async function GET(
   req: NextRequest,
@@ -51,7 +54,7 @@ export async function GET(
       userFound: !!user,
       user: user
         ? {
-            user_id: user.user_id,
+            user_id: (user as any).user_id,
             name: user.name,
             role: user.role,
             profile_slug: user.profile_slug,
@@ -65,109 +68,122 @@ export async function GET(
     });
   }
 
-  return new ImageResponse(
-    (
-      <div
-        style={{
-          width: "1080px",
-          height: "1920px",
-          display: "flex",
-          position: "relative",
-          borderRadius: 80,
-          overflow: "hidden",
-          background: "#111",
-          fontFamily: "system-ui",
-        }}
-      >
-        {safePhoto ? (
-          <img
-            src={safePhoto}
-            width="1080"
-            height="1920"
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-            }}
-          />
-        ) : null}
-
-        <div
-          style={{
+  // Build React element without JSX (so route.ts compiles)
+  const root = h(
+    "div",
+    {
+      style: {
+        width: "1080px",
+        height: "1920px",
+        display: "flex",
+        position: "relative",
+        borderRadius: "80px",
+        overflow: "hidden",
+        background: "#111",
+        fontFamily: "system-ui",
+      },
+    },
+    safePhoto
+      ? h("img", {
+          src: safePhoto,
+          width: 1080,
+          height: 1920,
+          style: {
             position: "absolute",
             inset: 0,
-            background:
-              "linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.05) 55%, rgba(0,0,0,0.55))",
-          }}
-        />
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+          },
+        })
+      : null,
 
-        <div
-          style={{
-            position: "absolute",
-            top: 110,
-            left: 80,
-            right: 80,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            color: "white",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              padding: "18px 26px",
-              borderRadius: 22,
-              border: `6px solid ${accent}`,
-              background: "rgba(0,0,0,0.25)",
-              fontSize: 92,
-              fontWeight: 900,
-              lineHeight: 1.05,
-            }}
-          >
-            {name}
-          </div>
+    // Gradient overlay
+    h("div", {
+      style: {
+        position: "absolute",
+        inset: 0,
+        background:
+          "linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.05) 55%, rgba(0,0,0,0.55))",
+      },
+    }),
 
-          <div style={{ marginTop: 28, fontSize: 48, opacity: 0.9 }}>
-            Connecting
-          </div>
-        </div>
-
-        <div
-          style={{
-            position: "absolute",
-            left: 80,
-            right: 80,
-            bottom: 100,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
-            gap: 40,
-            color: "white",
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 68, fontWeight: 900 }}>{school}</div>
-            <div style={{ fontSize: 44, opacity: 0.9 }}>{job}</div>
-          </div>
-
-          <div
-            style={{
-              background: "rgba(255,255,255,0.92)",
-              color: "#000",
-              padding: "28px 44px",
-              borderRadius: 28,
-              fontSize: 44,
-              fontWeight: 900,
-            }}
-          >
-            Connect Now
-          </div>
-        </div>
-      </div>
+    // Top block
+    h(
+      "div",
+      {
+        style: {
+          position: "absolute",
+          top: "110px",
+          left: "80px",
+          right: "80px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          color: "white",
+          textAlign: "center",
+        },
+      },
+      h(
+        "div",
+        {
+          style: {
+            padding: "18px 26px",
+            borderRadius: "22px",
+            border: `6px solid ${accent}`,
+            background: "rgba(0,0,0,0.25)",
+            fontSize: "92px",
+            fontWeight: 900,
+            lineHeight: 1.05,
+          },
+        },
+        name
+      ),
+      h(
+        "div",
+        { style: { marginTop: "28px", fontSize: "48px", opacity: 0.9 } },
+        "Connecting"
+      )
     ),
-    { width: 1080, height: 1920 }
+
+    // Bottom block
+    h(
+      "div",
+      {
+        style: {
+          position: "absolute",
+          left: "80px",
+          right: "80px",
+          bottom: "100px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          gap: "40px",
+          color: "white",
+        },
+      },
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column" } },
+        h("div", { style: { fontSize: "68px", fontWeight: 900 } }, school),
+        h("div", { style: { fontSize: "44px", opacity: 0.9 } }, job)
+      ),
+      h(
+        "div",
+        {
+          style: {
+            background: "rgba(255,255,255,0.92)",
+            color: "#000",
+            padding: "28px 44px",
+            borderRadius: "28px",
+            fontSize: "44px",
+            fontWeight: 900,
+          },
+        },
+        "Connect Now"
+      )
+    )
   );
+
+  return new ImageResponse(root, { width: 1080, height: 1920 });
 }
