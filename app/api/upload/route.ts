@@ -56,6 +56,7 @@ export async function POST(req: Request) {
     .update({
       photo_url: photoUrl,
       card_status: "photo_received",
+      card_last_generated_at: new Date().toISOString(), 
     })
     .eq("profile_slug", slug);
 
