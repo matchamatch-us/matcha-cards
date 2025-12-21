@@ -1,3 +1,4 @@
+
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import sharp from "sharp";
@@ -5,11 +6,21 @@ import sharp from "sharp";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BUCKET = "profile-photos"; // your Supabase bucket name
+const BUCKET = "profile-photos"; // Supabase bucket name
 const FOLDER = "photos"; // folder inside the bucket
 
 function json(data: any, status = 200) {
   return NextResponse.json(data, { status });
+}
+
+function getSupabaseAdmin() {
+  const supabaseUrl = process.env.SUPABASE_URL!;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  if (!supabaseUrl || !serviceKey) return null;
+
+  return createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -21,13 +32,39 @@ export async function GET(req: NextRequest) {
   const slug = url.searchParams.get("slug") || "";
   const token = url.searchParams.get("token") || "";
 
-  const envToken = process.env.UPLOAD_TOKEN || "";
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return json({ ok: false, error: "Missing Supabase env vars" }, 500);
+
+  if (!slug) {
+    return json({
+      ok: true,
+      slug,
+      tokenPresent: Boolean(token),
+      userFound: false,
+      tokenMatchesDb: false,
+      note: "Missing slug",
+    });
+  }
+
+  const { data: user, error } = await supabase
+    .from("users")
+    .select("user_id, profile_slug, upload_token")
+    .eq("profile_slug", slug)
+    .maybeSingle();
+
+  if (error) {
+    return json({ ok: false, error: error.message }, 500);
+  }
+
+  const expected = user?.upload_token || "";
+
   return json({
     ok: true,
     slug,
     tokenPresent: Boolean(token),
-    envTokenSet: Boolean(envToken),
-    tokenMatchesEnv: Boolean(envToken) && token === envToken,
+    userFound: Boolean(user),
+    dbTokenSet: Boolean(expected),
+    tokenMatchesDb: Boolean(expected) && token === expected,
   });
 }
 
@@ -38,29 +75,25 @@ export async function POST(req: NextRequest) {
   const token = url.searchParams.get("token") || "";
 
   if (!slug) return json({ error: "Missing slug" }, 400);
+  if (!token) return json({ error: "Missing token" }, 400);
 
-  const expected = process.env.UPLOAD_TOKEN || "";
-  if (!expected) {
-    // This is the #1 cause of "Invalid token" on Vercel
-    return json(
-      { error: "Server missing UPLOAD_TOKEN env var (set it in Vercel and redeploy)" },
-      500
-    );
-  }
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return json({ error: "Missing Supabase env vars" }, 500);
 
-  if (!token || token !== expected) {
+  // ✅ Validate token AGAINST DB (per-user token), not env var
+  const { data: user, error: userErr } = await supabase
+    .from("users")
+    .select("user_id, profile_slug, upload_token")
+    .eq("profile_slug", slug)
+    .maybeSingle();
+
+  if (userErr) return json({ error: userErr.message }, 500);
+  if (!user) return json({ error: "User not found for this slug" }, 404);
+
+  const expected = user.upload_token || "";
+  if (!expected || token !== expected) {
     return json({ error: "Invalid token" }, 401);
   }
-
-  const supabaseUrl = process.env.SUPABASE_URL!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  if (!supabaseUrl || !serviceKey) {
-    return json({ error: "Missing Supabase env vars" }, 500);
-  }
-
-  const supabase = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false },
-  });
 
   const form = await req.formData();
   const file = form.get("file");
@@ -72,8 +105,7 @@ export async function POST(req: NextRequest) {
   // Read file bytes
   const inBuf = Buffer.from(await file.arrayBuffer());
 
-  // Convert ANY image (including HEIC) -> real JPEG bytes
-  // rotate() fixes iPhone orientation
+  // Convert to JPEG bytes (JPG/PNG will work; HEIC may fail depending on sharp build)
   let jpgBuf: Buffer;
   try {
     jpgBuf = await sharp(inBuf).rotate().jpeg({ quality: 85 }).toBuffer();
@@ -89,29 +121,40 @@ export async function POST(req: NextRequest) {
 
   const path = `${FOLDER}/${slug}.jpg`;
 
-  // Upload to Supabase Storage (public bucket)
-  const { error: upErr } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, jpgBuf, {
-      upsert: true,
-      contentType: "image/jpeg",
-      cacheControl: "3600",
-    });
+  // Upload to Supabase Storage
+  const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, jpgBuf, {
+    upsert: true,
+    contentType: "image/jpeg",
+    cacheControl: "3600",
+  });
 
   if (upErr) return json({ error: upErr.message }, 500);
 
-  // Get public URL
+  // Public URL
   const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const publicUrl = pub.publicUrl;
 
-  // Update user photo_url in DB by slug
+  // Update DB: set photo_url and (optionally) clear token so it can’t be reused
+  const nowIso = new Date().toISOString();
+  const origin = process.env.SITE_URL || new URL(req.url).origin;
+
+  const cardFullUrl = `${origin}/p/${slug}`;
+  const cardOgUrl = `${origin}/api/og/${slug}?v=${Date.now()}`;
+
   const { error: dbErr } = await supabase
     .from("users")
-    .update({ photo_url: publicUrl })
+    .update({
+      photo_url: publicUrl,
+      card_full_url: cardFullUrl,
+      card_og_url: cardOgUrl,
+      card_last_generated_at: nowIso,
+      upload_token: null, // ✅ invalidate the link after a successful upload
+    })
     .eq("profile_slug", slug);
 
   if (dbErr) return json({ error: dbErr.message }, 500);
 
-  // Redirect back to the profile page
-  return NextResponse.redirect(new URL(`/p/${slug}?v=${Date.now()}`, req.url), 303);
+  // Redirect to the profile page (with cache-bust)
+  return NextResponse.redirect(new URL(`/p/${slug}?v=${Date.now()}`, origin), 303);
 }
+
