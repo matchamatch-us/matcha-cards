@@ -5,8 +5,11 @@ import { getProfileBySlug } from "@/lib/getProfile";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest, context: { params: { slug: string } }) {
-  const slug = context.params.slug;
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ slug: string }> }
+) {
+  const { slug } = await params;
 
   const u = new URL(req.url);
   const debug = u.searchParams.get("debug") === "1";
@@ -40,16 +43,7 @@ export async function GET(req: NextRequest, context: { params: { slug: string } 
 
     return new Response(
       JSON.stringify(
-        {
-          slug,
-          userFound: Boolean(user),
-          name,
-          school,
-          job,
-          accent,
-          photoSrc,
-          photoFetch,
-        },
+        { slug, userFound: Boolean(user), name, school, job, accent, photoSrc, photoFetch },
         null,
         2
       ),
