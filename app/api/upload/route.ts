@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import sharp from "sharp";
@@ -6,8 +5,8 @@ import sharp from "sharp";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BUCKET = "profile-photos"; // Supabase bucket name
-const FOLDER = "photos"; // folder inside the bucket
+const BUCKET = "profile-photos";
+const FOLDER = "photos";
 
 function json(data: any, status = 200) {
   return NextResponse.json(data, { status });
@@ -16,8 +15,9 @@ function json(data: any, status = 200) {
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_URL!;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  if (!supabaseUrl || !serviceKey) return null;
-
+  if (!supabaseUrl || !serviceKey) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  }
   return createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
   });
@@ -32,55 +32,44 @@ export async function GET(req: NextRequest) {
   const slug = url.searchParams.get("slug") || "";
   const token = url.searchParams.get("token") || "";
 
-  const supabase = getSupabaseAdmin();
-  if (!supabase) return json({ ok: false, error: "Missing Supabase env vars" }, 500);
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("profile_slug, upload_token")
+      .eq("profile_slug", slug)
+      .maybeSingle();
 
-  if (!slug) {
     return json({
       ok: true,
       slug,
       tokenPresent: Boolean(token),
-      userFound: false,
-      tokenMatchesDb: false,
-      note: "Missing slug",
+      userFound: Boolean(user),
+      userHasToken: Boolean(user?.upload_token),
+      tokenMatchesUser: Boolean(user?.upload_token) && token === user?.upload_token,
+      error: error ? error.message : null,
     });
+  } catch (e: any) {
+    return json({ ok: false, error: e?.message || String(e) }, 500);
   }
-
-  const { data: user, error } = await supabase
-    .from("users")
-    .select("user_id, profile_slug, upload_token")
-    .eq("profile_slug", slug)
-    .maybeSingle();
-
-  if (error) {
-    return json({ ok: false, error: error.message }, 500);
-  }
-
-  const expected = user?.upload_token || "";
-
-  return json({
-    ok: true,
-    slug,
-    tokenPresent: Boolean(token),
-    userFound: Boolean(user),
-    dbTokenSet: Boolean(expected),
-    tokenMatchesDb: Boolean(expected) && token === expected,
-  });
 }
 
 export async function POST(req: NextRequest) {
   const url = new URL(req.url);
-
   const slug = url.searchParams.get("slug") || "";
   const token = url.searchParams.get("token") || "";
 
   if (!slug) return json({ error: "Missing slug" }, 400);
   if (!token) return json({ error: "Missing token" }, 400);
 
-  const supabase = getSupabaseAdmin();
-  if (!supabase) return json({ error: "Missing Supabase env vars" }, 500);
+  let supabase;
+  try {
+    supabase = getSupabaseAdmin();
+  } catch (e: any) {
+    return json({ error: e?.message || "Missing Supabase env vars" }, 500);
+  }
 
-  // ✅ Validate token AGAINST DB (per-user token), not env var
+  // 1) Load expected token for this user
   const { data: user, error: userErr } = await supabase
     .from("users")
     .select("user_id, profile_slug, upload_token")
@@ -88,13 +77,20 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
 
   if (userErr) return json({ error: userErr.message }, 500);
-  if (!user) return json({ error: "User not found for this slug" }, 404);
+  if (!user) return json({ error: "User not found for slug" }, 404);
 
-  const expected = user.upload_token || "";
-  if (!expected || token !== expected) {
+  if (!user.upload_token) {
+    return json(
+      { error: "Upload token not set for this user (upload_token is NULL in users table)" },
+      401
+    );
+  }
+
+  if (token !== user.upload_token) {
     return json({ error: "Invalid token" }, 401);
   }
 
+  // 2) Get file
   const form = await req.formData();
   const file = form.get("file");
 
@@ -102,10 +98,9 @@ export async function POST(req: NextRequest) {
     return json({ error: "Missing file" }, 400);
   }
 
-  // Read file bytes
+  // 3) Convert -> JPEG (rotate fixes iPhone orientation)
   const inBuf = Buffer.from(await file.arrayBuffer());
 
-  // Convert to JPEG bytes (JPG/PNG will work; HEIC may fail depending on sharp build)
   let jpgBuf: Buffer;
   try {
     jpgBuf = await sharp(inBuf).rotate().jpeg({ quality: 85 }).toBuffer();
@@ -121,7 +116,7 @@ export async function POST(req: NextRequest) {
 
   const path = `${FOLDER}/${slug}.jpg`;
 
-  // Upload to Supabase Storage
+  // 4) Upload
   const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, jpgBuf, {
     upsert: true,
     contentType: "image/jpeg",
@@ -130,31 +125,21 @@ export async function POST(req: NextRequest) {
 
   if (upErr) return json({ error: upErr.message }, 500);
 
-  // Public URL
   const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const publicUrl = pub.publicUrl;
 
-  // Update DB: set photo_url and (optionally) clear token so it can’t be reused
-  const nowIso = new Date().toISOString();
-  const origin = process.env.SITE_URL || new URL(req.url).origin;
-
-  const cardFullUrl = `${origin}/p/${slug}`;
-  const cardOgUrl = `${origin}/api/og/${slug}?v=${Date.now()}`;
-
+  // 5) Update DB + invalidate token so link can't be reused
   const { error: dbErr } = await supabase
     .from("users")
     .update({
       photo_url: publicUrl,
-      card_full_url: cardFullUrl,
-      card_og_url: cardOgUrl,
-      card_last_generated_at: nowIso,
-      upload_token: null, // ✅ invalidate the link after a successful upload
+      upload_token: null,
+      updated_at: new Date().toISOString(),
     })
     .eq("profile_slug", slug);
 
   if (dbErr) return json({ error: dbErr.message }, 500);
 
-  // Redirect to the profile page (with cache-bust)
-  return NextResponse.redirect(new URL(`/p/${slug}?v=${Date.now()}`, origin), 303);
+  // 6) Redirect to card
+  return NextResponse.redirect(new URL(`/p/${slug}?v=${Date.now()}`, req.url), 303);
 }
-
