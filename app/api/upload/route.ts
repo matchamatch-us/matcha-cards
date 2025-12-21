@@ -128,12 +128,11 @@ export async function POST(req: NextRequest) {
   const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const publicUrl = pub.publicUrl;
 
-  // 5) Update DB + invalidate token so link can't be reused
+  // 5) Update DB (IMPORTANT: do NOT null upload_token)
   const { error: dbErr } = await supabase
     .from("users")
     .update({
       photo_url: publicUrl,
-      upload_token: null,
       updated_at: new Date().toISOString(),
     })
     .eq("profile_slug", slug);
