@@ -1,145 +1,147 @@
-import type { Metadata } from "next";
 import { getProfileBySlug } from "@/lib/getProfile";
-
-function cleanBaseUrl(url: string) {
-  return url.replace(/\/$/, "");
-}
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata({
-  params,
-  searchParams,
-}: {
-  params: { slug: string } | Promise<{ slug: string }>;
-  searchParams?: Record<string, string> | Promise<Record<string, string>>;
-}): Promise<Metadata> {
+export async function generateMetadata(
+  { params }: { params: Promise<{ slug: string }> }
+) {
   const { slug } = await params;
-  const sp = (await searchParams) || {};
-  const shareV = typeof sp.v === "string" ? sp.v : undefined;
+  const { user, extra } = await getProfileBySlug(slug);
 
-  const baseUrl = cleanBaseUrl(
-    process.env.SITE_URL || "https://matcha-cards.vercel.app"
-  );
+  const name = user?.name ?? "Matcha Match";
+  const school = extra?.school ?? "";
+  const job = extra?.job_type ?? "";
+  const baseUrl = process.env.SITE_URL || "https://matcha-cards.vercel.app";
 
-  try {
-    const { user, extra } = await getProfileBySlug(slug);
+  const og = `${baseUrl}/api/og/${slug}?v=${Date.now()}`;
 
-    const title = user?.name ? `${user.name} • Matcha Match` : "Matcha Match";
-    const description = extra?.school
-      ? `${extra.school}${extra.job_type ? " • " + extra.job_type : ""}`
-      : "Matcha Match profile card";
-
-    // Use a cache-busting version.
-    // Priority:
-    // 1) explicit ?v= passed in the URL (lets you force-refresh iMessage preview)
-    // 2) user's updated_at (if present in users table)
-    // 3) user's card_last_generated_at
-    // 4) fallback to slug (stable)
-    const updatedAt =
-      (user as any)?.updated_at ||
-      (user as any)?.card_last_generated_at ||
-      null;
-
-    const version =
-      shareV ||
-      (updatedAt ? String(new Date(updatedAt as string).getTime()) : slug);
-
-    const ogImage = `${baseUrl}/api/og/${encodeURIComponent(
-      slug
-    )}?v=${encodeURIComponent(version)}`;
-
-    return {
-      title,
-      description,
-      openGraph: {
-        title,
-        description,
-        url: `${baseUrl}/p/${encodeURIComponent(slug)}`,
-        images: [
-          {
-            url: ogImage,
-            width: 1080,
-            height: 1920,
-          },
-        ],
-      },
-      twitter: {
-        card: "summary_large_image",
-        title,
-        description,
-        images: [ogImage],
-      },
-      alternates: {
-        canonical: `${baseUrl}/p/${encodeURIComponent(slug)}`,
-      },
-    };
-  } catch (e) {
-    // Never let metadata throw (it can cause iMessage + bots to cache a bad response)
-    const ogImage = `${baseUrl}/default-og.png`;
-    return {
-      title: "Matcha Match",
-      description: "Matcha Match profile card",
-      openGraph: {
-        title: "Matcha Match",
-        description: "Matcha Match profile card",
-        url: `${baseUrl}/p/${encodeURIComponent(slug)}`,
-        images: [{ url: ogImage, width: 1200, height: 630 }],
-      },
-      twitter: {
-        card: "summary_large_image",
-        title: "Matcha Match",
-        description: "Matcha Match profile card",
-        images: [ogImage],
-      },
-    };
-  }
+  return {
+    title: `${name} • Matcha Match`,
+    description: [school, job].filter(Boolean).join(" • "),
+    openGraph: {
+      title: `${name} • Matcha Match`,
+      description: [school, job].filter(Boolean).join(" • "),
+      url: `${baseUrl}/p/${slug}`,
+      images: [{ url: og, width: 1080, height: 1920 }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${name} • Matcha Match`,
+      description: [school, job].filter(Boolean).join(" • "),
+      images: [og],
+    },
+  };
 }
 
-export default async function ProfilePage({
-  params,
-  searchParams,
-}: {
-  params: { slug: string } | Promise<{ slug: string }>;
-  searchParams?: Record<string, string> | Promise<Record<string, string>>;
-}) {
+export default async function ProfilePage(
+  { params }: { params: Promise<{ slug: string }> }
+) {
   const { slug } = await params;
-  const sp = (await searchParams) || {};
-  const shareV = typeof sp.v === "string" ? sp.v : undefined;
+  const { user, extra } = await getProfileBySlug(slug);
 
-  const baseUrl = cleanBaseUrl(
-    process.env.SITE_URL || "https://matcha-cards.vercel.app"
-  );
+  if (!user) {
+    return (
+      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#0b0b0b", color: "white", padding: 24 }}>
+        <div>Profile not found.</div>
+      </main>
+    );
+  }
 
-  // Render the exact image used for OG (so you can visually confirm)
-  const version = shareV || String(Date.now()); // ok for the page render
-  const ogImage = `${baseUrl}/api/og/${encodeURIComponent(
-    slug
-  )}?v=${encodeURIComponent(version)}`;
+  const name = user.name ?? "Matcha Match User";
+  const school = extra?.school ?? "";
+  const job = extra?.job_type ?? "";
+  const accent = (user as any)?.favorite_color || "#7CFFB2";
+  const photo = user.photo_url || "";
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        padding: 24,
-        background: "#0b0b0b",
-      }}
-    >
+    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#0b0b0b", padding: 24 }}>
       <div style={{ width: "min(440px, 92vw)" }}>
-        <img
-          src={ogImage}
-          alt="Matcha Match profile card"
+        <div
           style={{
             width: "100%",
-            height: "auto",
+            aspectRatio: "9 / 16",
             borderRadius: 28,
+            overflow: "hidden",
+            position: "relative",
+            backgroundColor: "#111",
             boxShadow: "0 20px 80px rgba(0,0,0,0.6)",
-            display: "block",
+            backgroundImage: photo ? `url(${photo})` : undefined,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
           }}
-        />
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.05) 55%, rgba(0,0,0,0.55))",
+            }}
+          />
+
+          <div
+            style={{
+              position: "absolute",
+              top: "7%",
+              left: "7%",
+              right: "7%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              textAlign: "center",
+              color: "white",
+            }}
+          >
+            <div
+              style={{
+                padding: "12px 18px",
+                borderRadius: 18,
+                border: `4px solid ${accent}`,
+                background: "rgba(0,0,0,0.25)",
+                fontSize: 42,
+                fontWeight: 900,
+                lineHeight: 1.05,
+              }}
+            >
+              {name}
+            </div>
+            <div style={{ marginTop: 14, fontSize: 22, opacity: 0.9 }}>
+              Connecting
+            </div>
+          </div>
+
+          <div
+            style={{
+              position: "absolute",
+              left: "7%",
+              right: "7%",
+              bottom: "7%",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-end",
+              gap: 16,
+              color: "white",
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>{school}</div>
+              <div style={{ fontSize: 18, opacity: 0.9 }}>{job}</div>
+            </div>
+
+            <div
+              style={{
+                background: "rgba(255,255,255,0.92)",
+                color: "#000",
+                padding: "12px 16px",
+                borderRadius: 16,
+                fontSize: 16,
+                fontWeight: 900,
+              }}
+            >
+              Connect Now
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   );
