@@ -5,6 +5,25 @@ import { getProfileBySlug } from "@/lib/getProfile";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
+function abToBase64(ab: ArrayBuffer) {
+  // Edge-safe base64 conversion (no Buffer)
+  const bytes = new Uint8Array(ab);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  // @ts-ignore
+  return btoa(binary);
+}
+
+function normalizeAccent(accent: string) {
+  const a = (accent || "").trim();
+  if (!a) return "#7CFFB2";
+  if (a.startsWith("#")) return a;        // hex
+  return a;                               // allow CSS color names like "yellow"
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
@@ -19,18 +38,15 @@ export async function GET(
   const name = user?.name ?? "Matcha Match User";
   const school = extra?.school ?? "";
   const job = extra?.job_type ?? "";
-  const accent = (user as any)?.favorite_color ?? "#7CFFB2";
-
+  const accent = normalizeAccent((user as any)?.favorite_color ?? "#7CFFB2");
   const photoUrl = user?.photo_url ?? "";
-  const photoSrc = photoUrl
-    ? `${photoUrl}${photoUrl.includes("?") ? "&" : "?"}t=${Date.now()}`
-    : "";
 
+  // Debug mode
   if (debug) {
     let photoFetch: any = null;
-    if (photoSrc) {
+    if (photoUrl) {
       try {
-        const r = await fetch(photoSrc, { cache: "no-store" });
+        const r = await fetch(photoUrl, { cache: "no-store" });
         photoFetch = {
           ok: r.ok,
           status: r.status,
@@ -43,12 +59,28 @@ export async function GET(
 
     return new Response(
       JSON.stringify(
-        { slug, userFound: Boolean(user), name, school, job, accent, photoSrc, photoFetch },
+        { slug, userFound: Boolean(user), name, school, job, accent, photoUrl, photoFetch },
         null,
         2
       ),
       { headers: { "content-type": "application/json" } }
     );
+  }
+
+  // Fetch photo bytes and embed as data URL (this is the key fix)
+  let photoDataUrl = "";
+  if (photoUrl) {
+    try {
+      const r = await fetch(photoUrl, { cache: "no-store" });
+      if (r.ok) {
+        const ct = r.headers.get("content-type") || "image/jpeg";
+        const ab = await r.arrayBuffer();
+        const b64 = abToBase64(ab);
+        photoDataUrl = `data:${ct};base64,${b64}`;
+      }
+    } catch {
+      photoDataUrl = "";
+    }
   }
 
   const img = new ImageResponse(
@@ -64,9 +96,9 @@ export async function GET(
           fontFamily: "system-ui",
         }}
       >
-        {photoSrc ? (
+        {photoDataUrl ? (
           <img
-            src={photoSrc}
+            src={photoDataUrl}
             style={{
               position: "absolute",
               inset: 0,
