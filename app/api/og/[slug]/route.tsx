@@ -5,8 +5,9 @@ import { getProfileBySlug } from "@/lib/getProfile";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest, { params }: { params: { slug: string } }) {
-  const slug = params.slug;
+export async function GET(req: NextRequest, context: { params: { slug: string } }) {
+  const slug = context.params.slug;
+
   const u = new URL(req.url);
   const debug = u.searchParams.get("debug") === "1";
 
@@ -16,19 +17,21 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
   const school = extra?.school ?? "";
   const job = extra?.job_type ?? "";
   const accent = (user as any)?.favorite_color ?? "#7CFFB2";
-  const photoUrl = user?.photo_url ?? "";
 
-  // If debug=1, return JSON with photo fetch status (super helpful)
+  const photoUrl = user?.photo_url ?? "";
+  const photoSrc = photoUrl
+    ? `${photoUrl}${photoUrl.includes("?") ? "&" : "?"}t=${Date.now()}`
+    : "";
+
   if (debug) {
     let photoFetch: any = null;
-    if (photoUrl) {
+    if (photoSrc) {
       try {
-        const res = await fetch(photoUrl, { cache: "no-store" });
-        const ct = res.headers.get("content-type");
+        const r = await fetch(photoSrc, { cache: "no-store" });
         photoFetch = {
-          ok: res.ok,
-          status: res.status,
-          contentType: ct,
+          ok: r.ok,
+          status: r.status,
+          contentType: r.headers.get("content-type"),
         };
       } catch (e: any) {
         photoFetch = { ok: false, error: e?.message || String(e) };
@@ -40,29 +43,18 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
         {
           slug,
           userFound: Boolean(user),
-          photoUrl,
-          photoFetch,
           name,
           school,
           job,
           accent,
+          photoSrc,
+          photoFetch,
         },
         null,
         2
       ),
       { headers: { "content-type": "application/json" } }
     );
-  }
-
-  // Fetch and inline photo bytes (this avoids OG <img src="remote"> flakiness)
-  let photoData: ArrayBuffer | null = null;
-  if (photoUrl) {
-    try {
-      const res = await fetch(photoUrl, { cache: "no-store" });
-      if (res.ok) photoData = await res.arrayBuffer();
-    } catch {
-      photoData = null;
-    }
   }
 
   const img = new ImageResponse(
@@ -78,10 +70,9 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
           fontFamily: "system-ui",
         }}
       >
-        {/* Background photo */}
-        {photoData ? (
+        {photoSrc ? (
           <img
-            src={photoData as any}
+            src={photoSrc}
             style={{
               position: "absolute",
               inset: 0,
@@ -92,7 +83,6 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
           />
         ) : null}
 
-        {/* Dark gradient overlay */}
         <div
           style={{
             position: "absolute",
@@ -102,7 +92,6 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
           }}
         />
 
-        {/* Top */}
         <div
           style={{
             position: "absolute",
@@ -135,8 +124,7 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
           </div>
         </div>
 
-        {/* Bottom */}
-        <div>
+        <div
           style={{
             position: "absolute",
             left: 80,
@@ -172,7 +160,6 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
     { width: 1080, height: 1920 }
   );
 
-  // Avoid caching while you iterate
   img.headers.set("Cache-Control", "no-store");
   return img;
 }
