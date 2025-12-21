@@ -136,7 +136,7 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
         </div>
 
         {/* Bottom */}
-        <div
+        <div>
           style={{
             position: "absolute",
             left: 80,
